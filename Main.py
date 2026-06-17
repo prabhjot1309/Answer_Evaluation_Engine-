@@ -1,8 +1,11 @@
 """
 Answer Evaluation Engine — FastAPI Application
+Render-ready: respects $PORT, CORS enabled
 """
 
+import os
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, field_validator
 import httpx
@@ -13,6 +16,14 @@ app = FastAPI(
     title="Answer Evaluation Engine",
     description="Automated scoring for technical interview answers (DSA, DBMS, OS)",
     version="1.0.0",
+)
+
+# ── CORS — allow any origin (needed if a frontend calls this API) ──
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["GET", "POST"],
+    allow_headers=["*"],
 )
 
 
@@ -34,7 +45,6 @@ class EvaluationRequest(BaseModel):
     @field_validator("answer")
     @classmethod
     def answer_strip(cls, v):
-        # Allow empty answer — evaluator handles it with score=0
         return v.strip() if v else ""
 
 
@@ -50,7 +60,19 @@ class EvaluationResponse(BaseModel):
 
 @app.get("/health")
 async def health():
+    """Render uses this path to confirm the service is up."""
     return {"status": "ok", "service": "answer-evaluation-engine"}
+
+
+@app.get("/")
+async def root():
+    """Root endpoint — useful for quick browser check."""
+    return {
+        "service": "Answer Evaluation Engine",
+        "version": "1.0.0",
+        "docs": "/docs",
+        "health": "/health",
+    }
 
 
 @app.post("/evaluate", response_model=EvaluationResponse)
@@ -80,10 +102,7 @@ async def evaluate_answer(req: EvaluationRequest):
         raise HTTPException(status_code=500, detail=f"Internal error: {str(exc)}")
 
 
-# ──────────────────────────────────────────────
-# Global error handler
-# ──────────────────────────────────────────────
-
+# ── Global error handler ──
 @app.exception_handler(Exception)
 async def generic_exception_handler(request, exc):
     return JSONResponse(
