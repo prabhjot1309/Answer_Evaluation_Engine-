@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: answer-eval-api
+    runtime: docker          # use Docker, not Python runtime — avoids Python 3.14 issue
+    region: singapore
+    plan: free
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health
+    envVars:
+      - key: ANTHROPIC_API_KEY
+        sync: false
