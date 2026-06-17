@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: answer-eval-api
+    runtime: python
+    region: singapore
+    plan: free
+
+    pythonVersion: "3.12.3"       # pin explicitly — avoids Render picking 3.14
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+
+    healthCheckPath: /health
+
+    envVars:
+      - key: ANTHROPIC_API_KEY
+        sync: false              # set manually in Render dashboard
