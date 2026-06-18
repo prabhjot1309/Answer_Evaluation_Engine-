@@ -1,12 +1,10 @@
 """
 Answer Evaluation Engine — FastAPI Application
-Render-ready: serves frontend UI + /evaluate API
 """
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, HTMLResponse
-from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, field_validator
 import httpx
 import os
@@ -15,7 +13,6 @@ from app.evaluator import evaluate
 
 app = FastAPI(
     title="Answer Evaluation Engine",
-    description="Automated scoring for technical interview answers (DSA, DBMS, OS)",
     version="1.0.0",
     docs_url="/docs",
 )
@@ -27,8 +24,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ── Load HTML once at startup ──
-HTML_PATH = os.path.join(os.path.dirname(__file__), "index.html")
+# ── index.html sits at /app/index.html inside the container ──
+HTML_PATH = "/app/index.html"
 
 def load_html():
     with open(HTML_PATH, "r") as f:
@@ -60,7 +57,6 @@ class EvaluationResponse(BaseModel):
 
 @app.get("/", response_class=HTMLResponse)
 async def root():
-    """Serve the frontend UI."""
     return HTMLResponse(content=load_html())
 
 @app.get("/health")
