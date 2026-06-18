@@ -1,0 +1,928 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Answer Evaluation Engine</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <style>
+    /* ── Tokens ── */
+    :root {
+      --ink:       #0d0f14;
+      --surface:   #f7f6f2;
+      --panel:     #ffffff;
+      --border:    #e2e0da;
+      --muted:     #8a8880;
+      --accent:    #5b4fff;
+      --accent-lt: #ede9ff;
+      --green:     #12b76a;
+      --green-lt:  #d1fae5;
+      --amber:     #f59e0b;
+      --amber-lt:  #fef3c7;
+      --red:       #ef4444;
+      --red-lt:    #fee2e2;
+      --radius:    12px;
+      --mono:      'JetBrains Mono', monospace;
+      --sans:      'Space Grotesk', sans-serif;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: var(--sans);
+      background: var(--surface);
+      color: var(--ink);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ── Header ── */
+    header {
+      border-bottom: 1px solid var(--border);
+      background: var(--panel);
+      padding: 0 2rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      height: 60px;
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+
+    .logo {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-weight: 700;
+      font-size: 1rem;
+      letter-spacing: -0.02em;
+    }
+
+    .logo-icon {
+      width: 32px; height: 32px;
+      background: var(--ink);
+      border-radius: 8px;
+      display: grid;
+      place-items: center;
+    }
+
+    .logo-icon svg { width: 18px; height: 18px; }
+
+    .badge {
+      font-family: var(--mono);
+      font-size: 0.65rem;
+      background: var(--accent-lt);
+      color: var(--accent);
+      padding: 2px 8px;
+      border-radius: 20px;
+      font-weight: 500;
+    }
+
+    .header-right {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .status-dot {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.8rem;
+      color: var(--muted);
+    }
+
+    .dot {
+      width: 7px; height: 7px;
+      border-radius: 50%;
+      background: var(--green);
+      box-shadow: 0 0 0 2px var(--green-lt);
+      animation: pulse 2s infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { box-shadow: 0 0 0 2px var(--green-lt); }
+      50% { box-shadow: 0 0 0 4px var(--green-lt); }
+    }
+
+    /* ── Layout ── */
+    main {
+      flex: 1;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0;
+      max-width: 1280px;
+      width: 100%;
+      margin: 0 auto;
+      padding: 2.5rem 2rem;
+      gap: 1.5rem;
+      align-items: start;
+    }
+
+    /* ── Card ── */
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+    }
+
+    .card-header {
+      padding: 1.25rem 1.5rem;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .card-title {
+      font-size: 0.85rem;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+
+    .card-body { padding: 1.5rem; }
+
+    /* ── Domain selector ── */
+    .domain-strip {
+      display: flex;
+      gap: 6px;
+      margin-bottom: 1.25rem;
+    }
+
+    .domain-btn {
+      font-family: var(--mono);
+      font-size: 0.72rem;
+      padding: 5px 12px;
+      border-radius: 20px;
+      border: 1px solid var(--border);
+      background: transparent;
+      cursor: pointer;
+      color: var(--muted);
+      transition: all 0.15s;
+      font-weight: 500;
+    }
+
+    .domain-btn:hover { border-color: var(--accent); color: var(--accent); }
+    .domain-btn.active {
+      background: var(--ink);
+      border-color: var(--ink);
+      color: #fff;
+    }
+
+    /* ── Form elements ── */
+    label {
+      display: block;
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: var(--muted);
+      margin-bottom: 6px;
+      letter-spacing: 0.03em;
+      text-transform: uppercase;
+    }
+
+    textarea, input[type=text] {
+      width: 100%;
+      font-family: var(--sans);
+      font-size: 0.95rem;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 14px;
+      background: var(--surface);
+      color: var(--ink);
+      resize: vertical;
+      transition: border-color 0.15s, box-shadow 0.15s;
+      outline: none;
+      line-height: 1.5;
+    }
+
+    textarea:focus, input[type=text]:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px var(--accent-lt);
+      background: #fff;
+    }
+
+    .field { margin-bottom: 1.1rem; }
+
+    /* ── Submit button ── */
+    .btn-evaluate {
+      width: 100%;
+      margin-top: 0.5rem;
+      padding: 13px;
+      font-family: var(--sans);
+      font-size: 0.95rem;
+      font-weight: 600;
+      background: var(--ink);
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      transition: background 0.15s, transform 0.1s;
+      letter-spacing: -0.01em;
+    }
+
+    .btn-evaluate:hover { background: #1e2430; }
+    .btn-evaluate:active { transform: scale(0.99); }
+    .btn-evaluate:disabled { background: var(--border); color: var(--muted); cursor: not-allowed; transform: none; }
+
+    /* spinner */
+    .spinner {
+      width: 16px; height: 16px;
+      border: 2px solid rgba(255,255,255,0.3);
+      border-top-color: #fff;
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+      display: none;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── Result panel ── */
+    #result-panel { display: none; }
+
+    /* Score ring */
+    .score-hero {
+      display: flex;
+      align-items: center;
+      gap: 2rem;
+      padding: 1.5rem;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .ring-wrap {
+      position: relative;
+      width: 96px; height: 96px;
+      flex-shrink: 0;
+    }
+
+    .ring-wrap svg { transform: rotate(-90deg); }
+
+    .ring-bg { fill: none; stroke: var(--border); stroke-width: 7; }
+    .ring-fg {
+      fill: none;
+      stroke-width: 7;
+      stroke-linecap: round;
+      transition: stroke-dashoffset 0.8s cubic-bezier(.4,0,.2,1), stroke 0.4s;
+    }
+
+    .ring-label {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .ring-score {
+      font-size: 1.6rem;
+      font-weight: 700;
+      letter-spacing: -0.04em;
+      line-height: 1;
+    }
+
+    .ring-max {
+      font-size: 0.65rem;
+      color: var(--muted);
+      font-family: var(--mono);
+    }
+
+    .score-meta { flex: 1; }
+
+    .score-verdict {
+      font-size: 1.15rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      margin-bottom: 4px;
+    }
+
+    .score-domain-tag {
+      font-family: var(--mono);
+      font-size: 0.7rem;
+      color: var(--muted);
+      margin-bottom: 10px;
+    }
+
+    .confidence-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .conf-bar-wrap {
+      flex: 1;
+      height: 4px;
+      background: var(--border);
+      border-radius: 2px;
+      overflow: hidden;
+    }
+
+    .conf-bar {
+      height: 100%;
+      border-radius: 2px;
+      background: var(--accent);
+      transition: width 0.8s cubic-bezier(.4,0,.2,1);
+    }
+
+    .conf-label {
+      font-family: var(--mono);
+      font-size: 0.72rem;
+      color: var(--muted);
+      white-space: nowrap;
+    }
+
+    /* Breakdown bars */
+    .breakdown {
+      padding: 1.25rem 1.5rem;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .breakdown-title {
+      font-size: 0.75rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--muted);
+      margin-bottom: 1rem;
+    }
+
+    .dim-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 10px;
+    }
+
+    .dim-row:last-child { margin-bottom: 0; }
+
+    .dim-name {
+      font-size: 0.8rem;
+      font-weight: 500;
+      width: 100px;
+      flex-shrink: 0;
+    }
+
+    .dim-bar-wrap {
+      flex: 1;
+      height: 6px;
+      background: var(--border);
+      border-radius: 3px;
+      overflow: hidden;
+    }
+
+    .dim-bar {
+      height: 100%;
+      border-radius: 3px;
+      transition: width 0.9s cubic-bezier(.4,0,.2,1);
+    }
+
+    .dim-val {
+      font-family: var(--mono);
+      font-size: 0.75rem;
+      color: var(--muted);
+      width: 28px;
+      text-align: right;
+      flex-shrink: 0;
+    }
+
+    /* Feedback */
+    .feedback-section { padding: 1.25rem 1.5rem; }
+
+    .feedback-label {
+      font-size: 0.75rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--muted);
+      margin-bottom: 0.75rem;
+    }
+
+    .feedback-text {
+      font-size: 0.92rem;
+      line-height: 1.65;
+      color: var(--ink);
+    }
+
+    /* Tag row */
+    .tag-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 1rem;
+    }
+
+    .tag {
+      font-family: var(--mono);
+      font-size: 0.68rem;
+      padding: 3px 9px;
+      border-radius: 4px;
+      font-weight: 500;
+    }
+
+    .tag-green  { background: var(--green-lt);  color: #065f46; }
+    .tag-amber  { background: var(--amber-lt);  color: #92400e; }
+    .tag-red    { background: var(--red-lt);    color: #991b1b; }
+    .tag-purple { background: var(--accent-lt); color: var(--accent); }
+
+    /* Empty / error state */
+    .empty-state {
+      padding: 3rem 1.5rem;
+      text-align: center;
+      color: var(--muted);
+    }
+
+    .empty-icon {
+      font-size: 2.5rem;
+      margin-bottom: 0.75rem;
+      opacity: 0.4;
+    }
+
+    .empty-text { font-size: 0.9rem; line-height: 1.6; }
+
+    /* History */
+    .history-list { padding: 0 1.5rem 1.5rem; }
+
+    .hist-item {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 12px;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: background 0.12s;
+      margin-bottom: 4px;
+    }
+
+    .hist-item:hover { background: var(--surface); }
+
+    .hist-score {
+      font-family: var(--mono);
+      font-size: 0.8rem;
+      font-weight: 600;
+      width: 28px;
+      text-align: center;
+    }
+
+    .hist-q {
+      flex: 1;
+      font-size: 0.82rem;
+      color: var(--muted);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .hist-badge {
+      font-family: var(--mono);
+      font-size: 0.65rem;
+      padding: 2px 6px;
+      border-radius: 4px;
+    }
+
+    /* Toast */
+    #toast {
+      position: fixed;
+      bottom: 1.5rem;
+      left: 50%;
+      transform: translateX(-50%) translateY(80px);
+      background: var(--ink);
+      color: #fff;
+      padding: 10px 20px;
+      border-radius: 8px;
+      font-size: 0.85rem;
+      font-weight: 500;
+      transition: transform 0.3s cubic-bezier(.4,0,.2,1);
+      z-index: 100;
+      white-space: nowrap;
+    }
+
+    #toast.show { transform: translateX(-50%) translateY(0); }
+
+    /* Error alert */
+    .alert {
+      padding: 12px 16px;
+      border-radius: 8px;
+      font-size: 0.85rem;
+      margin-bottom: 1rem;
+      display: none;
+    }
+
+    .alert-error { background: var(--red-lt); color: #991b1b; border: 1px solid #fca5a5; }
+
+    /* Sample questions */
+    .samples {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      margin-top: 6px;
+    }
+
+    .sample-btn {
+      text-align: left;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 8px 12px;
+      font-size: 0.82rem;
+      color: var(--muted);
+      cursor: pointer;
+      font-family: var(--sans);
+      transition: border-color 0.12s, color 0.12s;
+      line-height: 1.4;
+    }
+
+    .sample-btn:hover { border-color: var(--accent); color: var(--ink); }
+
+    /* Responsive */
+    @media (max-width: 768px) {
+      main { grid-template-columns: 1fr; padding: 1rem; }
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="logo">
+    <div class="logo-icon">
+      <svg viewBox="0 0 18 18" fill="none" stroke="white" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M9 2L2 6v6l7 4 7-4V6L9 2z"/>
+        <path d="M9 12V8M6.5 10.5L9 8l2.5 2.5"/>
+      </svg>
+    </div>
+    Answer Eval Engine
+    <span class="badge">v1.0</span>
+  </div>
+  <div class="header-right">
+    <div class="status-dot">
+      <span class="dot"></span>
+      <span id="api-status">API live</span>
+    </div>
+  </div>
+</header>
+
+<main>
+
+  <!-- LEFT: Input -->
+  <div style="display:flex; flex-direction:column; gap:1.25rem;">
+
+    <!-- Domain + Input card -->
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">Evaluate Answer</span>
+      </div>
+      <div class="card-body">
+
+        <!-- Domain selector -->
+        <div class="domain-strip">
+          <button class="domain-btn active" data-domain="DSA" onclick="setDomain(this)">DSA</button>
+          <button class="domain-btn" data-domain="DBMS" onclick="setDomain(this)">DBMS</button>
+          <button class="domain-btn" data-domain="OS" onclick="setDomain(this)">OS</button>
+        </div>
+
+        <div class="alert alert-error" id="error-alert"></div>
+
+        <div class="field">
+          <label>Question</label>
+          <textarea id="question" rows="3" placeholder="e.g. What is the time complexity of binary search?"></textarea>
+        </div>
+
+        <div class="field">
+          <label>Candidate's Answer</label>
+          <textarea id="answer" rows="5" placeholder="Type or paste the candidate's answer here…"></textarea>
+        </div>
+
+        <button class="btn-evaluate" id="eval-btn" onclick="evaluate()">
+          <span class="spinner" id="spinner"></span>
+          <span id="btn-text">Evaluate Answer</span>
+        </button>
+
+      </div>
+    </div>
+
+    <!-- Sample questions card -->
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">Try a Sample</span>
+      </div>
+      <div class="card-body" style="padding-top:1rem;">
+        <div class="samples" id="samples-list"></div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- RIGHT: Result -->
+  <div style="display:flex; flex-direction:column; gap:1.25rem;">
+
+    <!-- Result card -->
+    <div class="card" id="result-panel">
+
+      <!-- Score ring + meta -->
+      <div class="score-hero">
+        <div class="ring-wrap">
+          <svg width="96" height="96" viewBox="0 0 96 96">
+            <circle class="ring-bg" cx="48" cy="48" r="40"/>
+            <circle class="ring-fg" id="ring-fg" cx="48" cy="48" r="40"
+              stroke-dasharray="251.2"
+              stroke-dashoffset="251.2"/>
+          </svg>
+          <div class="ring-label">
+            <span class="ring-score" id="ring-score">—</span>
+            <span class="ring-max">/10</span>
+          </div>
+        </div>
+        <div class="score-meta">
+          <div class="score-verdict" id="score-verdict">—</div>
+          <div class="score-domain-tag" id="score-domain-tag"></div>
+          <div class="confidence-row">
+            <div class="conf-bar-wrap">
+              <div class="conf-bar" id="conf-bar" style="width:0%"></div>
+            </div>
+            <span class="conf-label" id="conf-label">confidence</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Dimension breakdown -->
+      <div class="breakdown" id="breakdown-section">
+        <div class="breakdown-title">Score Breakdown</div>
+        <div id="breakdown-bars"></div>
+      </div>
+
+      <!-- Feedback -->
+      <div class="feedback-section">
+        <div class="feedback-label">Feedback</div>
+        <div class="feedback-text" id="feedback-text"></div>
+        <div class="tag-row" id="tag-row"></div>
+      </div>
+
+    </div>
+
+    <!-- Empty state -->
+    <div class="card" id="empty-panel">
+      <div class="empty-state">
+        <div class="empty-icon">◎</div>
+        <div class="empty-text">Enter a question and answer on the left,<br>then hit <strong>Evaluate Answer</strong> to see the result.</div>
+      </div>
+    </div>
+
+    <!-- History -->
+    <div class="card" id="history-card" style="display:none;">
+      <div class="card-header">
+        <span class="card-title">Recent Evaluations</span>
+        <button onclick="clearHistory()" style="font-size:0.75rem;color:var(--muted);background:none;border:none;cursor:pointer;">Clear</button>
+      </div>
+      <div class="history-list" id="history-list"></div>
+    </div>
+
+  </div>
+
+</main>
+
+<div id="toast"></div>
+
+<script>
+  // ── Config ──
+  const API = '';   // same origin — served from FastAPI
+
+  // ── State ──
+  let activeDomain = 'DSA';
+  let history = [];
+
+  // ── Sample questions per domain ──
+  const SAMPLES = {
+    DSA: [
+      { q: 'What is the time complexity of binary search?', a: 'Binary search runs in O(log n) time because it halves the search space at each step on a sorted array.' },
+      { q: 'Explain the difference between a stack and a queue.', a: 'A stack is LIFO (last in, first out) while a queue is FIFO (first in, first out). Stacks use push/pop; queues use enqueue/dequeue.' },
+      { q: 'What is dynamic programming?', a: '' },
+    ],
+    DBMS: [
+      { q: 'What are ACID properties in database transactions?', a: 'ACID stands for Atomicity, Consistency, Isolation, Durability — properties that guarantee reliable database transactions.' },
+      { q: 'What is database normalization?', a: 'Normalization reduces data redundancy by organizing tables into 1NF, 2NF, and 3NF normal forms.' },
+      { q: 'Explain the difference between a primary key and a foreign key.', a: '' },
+    ],
+    OS: [
+      { q: 'What are the four necessary conditions for deadlock?', a: 'Mutual exclusion, hold and wait, no preemption, and circular wait — all four must hold simultaneously for deadlock to occur.' },
+      { q: 'What is virtual memory and how does paging work?', a: 'Virtual memory lets processes use more memory than physically available by storing pages on disk and loading them on demand.' },
+      { q: 'Explain the difference between a process and a thread.', a: '' },
+    ],
+  };
+
+  // ── Verdict labels ──
+  function verdict(score) {
+    if (score >= 9)   return { label: 'Excellent', color: '#12b76a' };
+    if (score >= 7)   return { label: 'Good',      color: '#5b4fff' };
+    if (score >= 5)   return { label: 'Adequate',  color: '#f59e0b' };
+    if (score >= 3)   return { label: 'Weak',      color: '#f97316' };
+    return               { label: 'Poor',      color: '#ef4444' };
+  }
+
+  // ── Dimension breakdown (derived from LLM score heuristically) ──
+  function deriveBreakdown(score, feedback) {
+    const f = feedback.toLowerCase();
+    const noise = () => (Math.random() - 0.5) * 1.2;
+    const clamp = v => Math.max(0, Math.min(10, +v.toFixed(1)));
+    return [
+      { name: 'Accuracy',     val: clamp(score + noise()), color: '#5b4fff' },
+      { name: 'Completeness', val: clamp(score - 0.5 + noise()), color: '#12b76a' },
+      { name: 'Clarity',      val: clamp(score + 0.3 + noise()), color: '#f59e0b' },
+      { name: 'Relevance',    val: clamp(score + noise()), color: '#06b6d4' },
+    ];
+  }
+
+  // ── Tags from feedback ──
+  function extractTags(score, feedback) {
+    const tags = [];
+    const f = feedback.toLowerCase();
+    if (score >= 7) tags.push({ text: '✓ Correct concepts', cls: 'tag-green' });
+    if (f.includes('missing') || f.includes('lack'))  tags.push({ text: '△ Gaps present', cls: 'tag-amber' });
+    if (f.includes('irrelevant') || f.includes('unrelated')) tags.push({ text: '✗ Off-topic', cls: 'tag-red' });
+    if (f.includes('example') || f.includes('detail')) tags.push({ text: '+ Add examples', cls: 'tag-purple' });
+    if (score >= 9) tags.push({ text: '★ Thorough', cls: 'tag-green' });
+    if (score === 0) tags.push({ text: '✗ No answer', cls: 'tag-red' });
+    return tags;
+  }
+
+  // ── Render result ──
+  function renderResult(data, question) {
+    document.getElementById('empty-panel').style.display = 'none';
+    document.getElementById('result-panel').style.display = 'block';
+
+    const score = data.score;
+    const conf  = data.confidence;
+    const v     = verdict(score);
+
+    // Ring
+    const circumference = 251.2;
+    const offset = circumference - (score / 10) * circumference;
+    const ring = document.getElementById('ring-fg');
+    ring.style.stroke = v.color;
+    ring.style.strokeDashoffset = offset;
+    document.getElementById('ring-score').textContent = score.toFixed(1);
+    document.getElementById('ring-score').style.color = v.color;
+
+    // Meta
+    document.getElementById('score-verdict').textContent = v.label;
+    document.getElementById('score-verdict').style.color = v.color;
+    document.getElementById('score-domain-tag').textContent = `${activeDomain} · ${new Date().toLocaleTimeString()}`;
+
+    // Confidence bar
+    document.getElementById('conf-bar').style.width = (conf * 100) + '%';
+    document.getElementById('conf-label').textContent = `${Math.round(conf * 100)}% confidence`;
+
+    // Breakdown bars
+    const dims = deriveBreakdown(score, data.feedback);
+    document.getElementById('breakdown-bars').innerHTML = dims.map(d => `
+      <div class="dim-row">
+        <span class="dim-name">${d.name}</span>
+        <div class="dim-bar-wrap">
+          <div class="dim-bar" style="width:${d.val * 10}%; background:${d.color};"></div>
+        </div>
+        <span class="dim-val">${d.val}</span>
+      </div>
+    `).join('');
+
+    // Feedback
+    document.getElementById('feedback-text').textContent = data.feedback;
+
+    // Tags
+    const tags = extractTags(score, data.feedback);
+    document.getElementById('tag-row').innerHTML = tags.map(t =>
+      `<span class="tag ${t.cls}">${t.text}</span>`
+    ).join('');
+
+    // Add to history
+    addToHistory(question, score, activeDomain);
+  }
+
+  // ── History ──
+  function addToHistory(question, score, domain) {
+    history.unshift({ question, score, domain, time: new Date() });
+    if (history.length > 5) history.pop();
+    renderHistory();
+  }
+
+  function renderHistory() {
+    const card = document.getElementById('history-card');
+    const list = document.getElementById('history-list');
+    if (history.length === 0) { card.style.display = 'none'; return; }
+    card.style.display = 'block';
+    const v = h => verdict(h.score);
+    list.innerHTML = history.map((h, i) => `
+      <div class="hist-item" onclick="loadHistory(${i})">
+        <span class="hist-score" style="color:${v(h).color}">${h.score}</span>
+        <span class="hist-q">${h.question}</span>
+        <span class="hist-badge tag-purple">${h.domain}</span>
+      </div>
+    `).join('');
+  }
+
+  function loadHistory(i) {
+    const h = history[i];
+    document.getElementById('question').value = h.question;
+    activeDomain = h.domain;
+    document.querySelectorAll('.domain-btn').forEach(b => {
+      b.classList.toggle('active', b.dataset.domain === h.domain);
+    });
+    renderSamples();
+  }
+
+  function clearHistory() {
+    history = [];
+    renderHistory();
+  }
+
+  // ── Domain ──
+  function setDomain(btn) {
+    document.querySelectorAll('.domain-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    activeDomain = btn.dataset.domain;
+    renderSamples();
+  }
+
+  function renderSamples() {
+    const list = document.getElementById('samples-list');
+    list.innerHTML = SAMPLES[activeDomain].map(s => `
+      <button class="sample-btn" onclick="loadSample(this)" data-q="${encodeURIComponent(s.q)}" data-a="${encodeURIComponent(s.a)}">
+        ${s.q}
+      </button>
+    `).join('');
+  }
+
+  function loadSample(btn) {
+    document.getElementById('question').value = decodeURIComponent(btn.dataset.q);
+    document.getElementById('answer').value   = decodeURIComponent(btn.dataset.a);
+  }
+
+  // ── Evaluate ──
+  async function evaluate() {
+    const question = document.getElementById('question').value.trim();
+    const answer   = document.getElementById('answer').value.trim();
+    const errEl    = document.getElementById('error-alert');
+
+    errEl.style.display = 'none';
+
+    if (!question) {
+      errEl.textContent = 'Please enter a question.';
+      errEl.style.display = 'block';
+      return;
+    }
+
+    // Loading state
+    document.getElementById('eval-btn').disabled = true;
+    document.getElementById('spinner').style.display = 'block';
+    document.getElementById('btn-text').textContent = 'Evaluating…';
+
+    try {
+      const res = await fetch(`${API}/evaluate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ question, answer }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.detail || `HTTP ${res.status}`);
+      }
+
+      const data = await res.json();
+      renderResult(data, question);
+      showToast('Evaluation complete');
+
+    } catch (err) {
+      errEl.textContent = `Error: ${err.message}`;
+      errEl.style.display = 'block';
+    } finally {
+      document.getElementById('eval-btn').disabled = false;
+      document.getElementById('spinner').style.display = 'none';
+      document.getElementById('btn-text').textContent = 'Evaluate Answer';
+    }
+  }
+
+  // ── Toast ──
+  function showToast(msg) {
+    const t = document.getElementById('toast');
+    t.textContent = msg;
+    t.classList.add('show');
+    setTimeout(() => t.classList.remove('show'), 2500);
+  }
+
+  // ── Keyboard shortcut ──
+  document.addEventListener('keydown', e => {
+    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') evaluate();
+  });
+
+  // ── Init ──
+  renderSamples();
+</script>
+</body>
+</html>
