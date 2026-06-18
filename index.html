@@ -600,7 +600,7 @@
           <textarea id="answer" rows="5" placeholder="Type or paste the candidate's answer here…"></textarea>
         </div>
 
-        <button class="btn-evaluate" id="eval-btn" onclick="evaluate()">
+        <button class="btn-evaluate" id="eval-btn" onclick="runEval()">
           <span class="spinner" id="spinner"></span>
           <span id="btn-text">Evaluate Answer</span>
         </button>
@@ -692,7 +692,7 @@
 
 <script>
   // ── Config ──
-  const API = '';   // same origin — served from FastAPI
+  const API = window.location.origin;
 
   // ── State ──
   let activeDomain = 'DSA';
@@ -864,7 +864,7 @@
   }
 
   // ── Evaluate ──
-  async function evaluate() {
+  async function runEval() {
     const question = document.getElementById('question').value.trim();
     const answer   = document.getElementById('answer').value.trim();
     const errEl    = document.getElementById('error-alert');
@@ -918,7 +918,7 @@
 
   // ── Keyboard shortcut ──
   document.addEventListener('keydown', e => {
-    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') evaluate();
+    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') runEval();
   });
 
   // ── Init ──
