@@ -1,13 +1,14 @@
 """
 Answer Evaluation Engine — Hybrid Rule-Based + LLM Evaluator
-Uses Google Gemini API (free tier, no credit card needed)
+Uses Google Gemini API (free tier)
 """
 
 import re
 import json
 import httpx
-from typing import Optional
+import asyncio
 import os
+from typing import Optional
 
 DOMAIN_KEYWORDS = {
     "dsa": [
@@ -91,14 +92,70 @@ def rule_based_check(question: str, answer: str) -> dict | None:
     return None
 
 # ──────────────────────────────────────────────
-# LLM Evaluation — Google Gemini (free)
+# Rule-Based Scoring Fallback (no API needed)
+# ──────────────────────────────────────────────
+
+def rule_based_score(question: str, answer: str) -> dict:
+    """
+    Fallback when LLM API is unavailable.
+    Uses keyword matching + answer length + relevance to produce a score.
+    """
+    a_lower = answer.lower()
+    q_lower = question.lower()
+    words = answer.strip().split()
+    word_count = len(words)
+
+    # Keyword hits from all domains
+    kw_hits = sum(1 for kw in ALL_KEYWORDS if kw in a_lower)
+
+    # How many question keywords appear in the answer
+    q_keywords = [kw for kw in ALL_KEYWORDS if kw in q_lower]
+    relevance = keyword_relevance_score(question, answer)
+
+    # Base score from word count
+    if word_count < 10:
+        length_score = 3.0
+    elif word_count < 25:
+        length_score = 5.0
+    elif word_count < 60:
+        length_score = 7.0
+    else:
+        length_score = 8.0
+
+    # Boost from keyword hits
+    kw_boost = min(kw_hits * 0.5, 2.0)
+
+    # Relevance multiplier
+    rel_mult = 0.6 if relevance < 0.2 else (0.85 if relevance < 0.5 else 1.0)
+
+    raw = (length_score + kw_boost) * rel_mult
+    score = round(min(max(raw, 1.0), 9.5) * 2) / 2
+
+    if score >= 7.5:
+        feedback = "The answer covers the key concepts well. Consider adding more depth or examples for a perfect score."
+    elif score >= 5.0:
+        feedback = "The answer shows basic understanding but is missing some important details or technical precision."
+    elif score >= 3.0:
+        feedback = "The answer is partially relevant but lacks accuracy or completeness. Review the topic more carefully."
+    else:
+        feedback = "The answer does not adequately address the question. Please review the core concepts and try again."
+
+    return {
+        "score": score,
+        "feedback": feedback + " (Note: evaluated using rule-based fallback)",
+        "confidence": round(0.5 + relevance * 0.3, 2),
+    }
+
+
+# ──────────────────────────────────────────────
+# LLM Evaluation — Google Gemini
 # ──────────────────────────────────────────────
 
 GEMINI_PROMPT = """You are a balanced technical interview evaluator for Computer Science: DSA, DBMS, and OS.
 
-Scoring rubric (be fair and generous):
+Scoring rubric:
 - 0-2: Completely wrong or irrelevant
-- 3-4: Has some idea but major errors or very incomplete
+- 3-4: Has some idea but major errors or very incomplete  
 - 5-6: Understands basics but missing important details
 - 7-8: Good answer — correct and reasonably complete (most good answers land here)
 - 9-10: Excellent — thorough, accurate, well-explained
@@ -116,46 +173,61 @@ Respond ONLY with valid JSON, no markdown:
   "confidence": <float 0.0-1.0>
 }"""
 
+# Try models in order — if one fails due to quota, try next
+GEMINI_MODELS = [
+    "gemini-2.0-flash-lite",
+    "gemini-2.0-flash",
+    "gemini-1.5-flash-8b",
+]
 
 async def llm_evaluate(question: str, answer: str) -> dict:
     api_key = os.environ.get("GEMINI_API_KEY", "")
     if not api_key:
-        raise ValueError("GEMINI_API_KEY environment variable not set")
+        raise ValueError("GEMINI_API_KEY not set")
 
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}"
+    prompt_text = f"Question: {question}\n\nCandidate's Answer: {answer}\n\nEvaluate and respond with JSON."
 
-    payload = {
-        "system_instruction": {"parts": [{"text": GEMINI_PROMPT}]},
-        "contents": [{
-            "parts": [{
-                "text": f"Question: {question}\n\nCandidate's Answer: {answer}\n\nEvaluate and respond with JSON."
-            }]
-        }],
-        "generationConfig": {
-            "temperature": 0.3,
-            "maxOutputTokens": 512,
+    last_error = None
+    for model in GEMINI_MODELS:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+        payload = {
+            "system_instruction": {"parts": [{"text": GEMINI_PROMPT}]},
+            "contents": [{"parts": [{"text": prompt_text}]}],
+            "generationConfig": {"temperature": 0.3, "maxOutputTokens": 512},
         }
-    }
 
-    async with httpx.AsyncClient(timeout=30) as client:
-        response = await client.post(url, json=payload, headers={"Content-Type": "application/json"})
-        response.raise_for_status()
-        data = response.json()
+        for attempt in range(2):  # 2 retries per model
+            try:
+                async with httpx.AsyncClient(timeout=30) as client:
+                    response = await client.post(
+                        url, json=payload,
+                        headers={"Content-Type": "application/json"}
+                    )
+                    if response.status_code == 429:
+                        await asyncio.sleep(2 ** attempt)
+                        last_error = Exception(f"429 quota on {model}")
+                        continue
+                    response.raise_for_status()
+                    data = response.json()
 
-    raw_text = data["candidates"][0]["content"]["parts"][0]["text"].strip()
+                raw_text = data["candidates"][0]["content"]["parts"][0]["text"].strip()
+                raw_text = re.sub(r"^```(?:json)?\s*", "", raw_text)
+                raw_text = re.sub(r"\s*```$", "", raw_text)
 
-    # Strip markdown fences if present
-    raw_text = re.sub(r"^```(?:json)?\s*", "", raw_text)
-    raw_text = re.sub(r"\s*```$", "", raw_text)
+                result = json.loads(raw_text)
+                score = round(min(max(float(result["score"]), 0.0), 10.0) * 2) / 2
+                confidence = round(min(max(float(result["confidence"]), 0.0), 1.0), 2)
+                feedback = str(result["feedback"]).strip()
+                return {"score": score, "feedback": feedback, "confidence": confidence}
 
-    result = json.loads(raw_text)
+            except (httpx.HTTPStatusError, Exception) as e:
+                last_error = e
+                if hasattr(e, 'response') and e.response.status_code == 429:
+                    await asyncio.sleep(2 ** attempt)
+                    continue
+                break  # non-429 error — try next model
 
-    score = max(0.0, min(10.0, float(result["score"])))
-    score = round(score * 2) / 2
-    confidence = max(0.0, min(1.0, float(result["confidence"])))
-    feedback = str(result["feedback"]).strip()
-
-    return {"score": score, "feedback": feedback, "confidence": confidence}
+    raise Exception(f"All Gemini models failed: {last_error}")
 
 
 # ──────────────────────────────────────────────
@@ -163,6 +235,7 @@ async def llm_evaluate(question: str, answer: str) -> dict:
 # ──────────────────────────────────────────────
 
 async def evaluate(question: str, answer: str) -> dict:
+    # Step 1: Rule-based fast path
     rule_result = rule_based_check(question, answer)
     if rule_result:
         return {
@@ -172,17 +245,23 @@ async def evaluate(question: str, answer: str) -> dict:
         }
 
     kw_relevance = keyword_relevance_score(question, answer)
-    llm_result = await llm_evaluate(question, answer)
 
-    final_score = llm_result["score"]
-    final_confidence = llm_result["confidence"]
+    # Step 2: Try LLM, fall back to rule-based scoring if API unavailable
+    try:
+        llm_result = await llm_evaluate(question, answer)
+        final_score = llm_result["score"]
+        final_confidence = llm_result["confidence"]
 
-    if kw_relevance < 0.05 and final_score > 6.0:
-        final_score = max(final_score * 0.8, 4.0)
-        final_confidence = round(final_confidence * 0.85, 2)
+        if kw_relevance < 0.05 and final_score > 6.0:
+            final_score = max(final_score * 0.8, 4.0)
+            final_confidence = round(final_confidence * 0.85, 2)
 
-    return {
-        "score": round(final_score, 1),
-        "feedback": llm_result["feedback"],
-        "confidence": round(final_confidence, 2),
-    }
+        return {
+            "score": round(final_score, 1),
+            "feedback": llm_result["feedback"],
+            "confidence": round(final_confidence, 2),
+        }
+
+    except Exception:
+        # Graceful fallback — rule-based scoring always works
+        return rule_based_score(question, answer)
