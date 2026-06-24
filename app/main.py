@@ -11,11 +11,7 @@ import os
 
 from app.evaluator import evaluate
 
-app = FastAPI(
-    title="Answer Evaluation Engine",
-    version="1.0.0",
-    docs_url="/docs",
-)
+app = FastAPI(title="Answer Evaluation Engine", version="1.0.0", docs_url="/docs")
 
 app.add_middleware(
     CORSMiddleware,
@@ -24,14 +20,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ── index.html sits at /app/index.html inside the container ──
 HTML_PATH = "/app/index.html"
 
 def load_html():
     with open(HTML_PATH, "r") as f:
         return f.read()
 
-# ── Models ──
 class EvaluationRequest(BaseModel):
     question: str
     answer: str
@@ -53,8 +47,6 @@ class EvaluationResponse(BaseModel):
     feedback: str
     confidence: float
 
-# ── Endpoints ──
-
 @app.get("/", response_class=HTMLResponse)
 async def root():
     return HTMLResponse(content=load_html())
@@ -69,9 +61,9 @@ async def evaluate_answer(req: EvaluationRequest):
         result = await evaluate(req.question, req.answer)
         return EvaluationResponse(**result)
     except httpx.HTTPStatusError as exc:
-        raise HTTPException(status_code=502, detail=f"LLM API error: {exc.response.status_code}")
+        raise HTTPException(status_code=502, detail=f"LLM API error: {exc.response.status_code} - {exc.response.text[:200]}")
     except httpx.TimeoutException:
-        raise HTTPException(status_code=504, detail="LLM API timed out. Please retry.")
+        raise HTTPException(status_code=504, detail="LLM API timed out.")
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
     except Exception as exc:
