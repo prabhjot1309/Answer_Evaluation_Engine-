@@ -227,13 +227,7 @@ Contributions are welcome! Please open an issue first to discuss what you'd like
 
 ---
 
-## 📄 License
-
-This project is open source. See [LICENSE](LICENSE) for details.
-
----
-
 ## 👤 Author
 
-**Prabhjot Singh**
+**Prabhjot Kaur**
 GitHub: [@prabhjot1309](https://github.com/prabhjot1309)
