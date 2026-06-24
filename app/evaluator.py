@@ -122,7 +122,7 @@ async def llm_evaluate(question: str, answer: str) -> dict:
     if not api_key:
         raise ValueError("GEMINI_API_KEY environment variable not set")
 
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}"
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}"
 
     payload = {
         "system_instruction": {"parts": [{"text": GEMINI_PROMPT}]},
