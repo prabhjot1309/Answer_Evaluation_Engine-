@@ -1,15 +1,14 @@
 """
 Answer Evaluation Engine — Hybrid Rule-Based + LLM Evaluator
+Uses Google Gemini API (free tier, no credit card needed)
 """
 
 import re
 import json
 import httpx
 from typing import Optional
+import os
 
-# ──────────────────────────────────────────────
-# Domain keyword sets for relevance pre-check
-# ──────────────────────────────────────────────
 DOMAIN_KEYWORDS = {
     "dsa": [
         "array", "linked list", "tree", "graph", "stack", "queue", "heap",
@@ -37,8 +36,6 @@ DOMAIN_KEYWORDS = {
 
 ALL_KEYWORDS = {kw for kws in DOMAIN_KEYWORDS.values() for kw in kws}
 
-ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages"
-
 # ──────────────────────────────────────────────
 # Rule-Based Pre-checks
 # ──────────────────────────────────────────────
@@ -60,16 +57,6 @@ def is_gibberish(answer: str) -> bool:
         return True
     return False
 
-def detect_domain(question: str, answer: str) -> Optional[str]:
-    combined = (question + " " + answer).lower()
-    scores = {domain: 0 for domain in DOMAIN_KEYWORDS}
-    for domain, keywords in DOMAIN_KEYWORDS.items():
-        for kw in keywords:
-            if kw in combined:
-                scores[domain] += 1
-    best = max(scores, key=scores.get)
-    return best if scores[best] > 0 else None
-
 def keyword_relevance_score(question: str, answer: str) -> float:
     q_lower = question.lower()
     a_lower = answer.lower()
@@ -90,81 +77,81 @@ def rule_based_check(question: str, answer: str) -> dict | None:
     if is_gibberish(answer):
         return {
             "score": 0.0,
-            "feedback": "The answer appears to be gibberish or random characters. Please provide a meaningful response.",
+            "feedback": "The answer appears to be gibberish. Please provide a meaningful response.",
             "confidence": 0.95,
             "rule_triggered": "gibberish",
         }
     if is_too_short(answer, min_words=3):
         return {
             "score": 1.0,
-            "feedback": "The answer is too brief to evaluate meaningfully. Please elaborate with more detail.",
+            "feedback": "The answer is too brief. Please elaborate with more detail.",
             "confidence": 0.9,
             "rule_triggered": "too_short",
         }
     return None
 
 # ──────────────────────────────────────────────
-# LLM Evaluation
+# LLM Evaluation — Google Gemini (free)
 # ──────────────────────────────────────────────
 
-LLM_SYSTEM_PROMPT = """You are a balanced and encouraging technical interview evaluator for Computer Science topics: Data Structures & Algorithms (DSA), Database Management Systems (DBMS), and Operating Systems (OS).
+GEMINI_PROMPT = """You are a balanced technical interview evaluator for Computer Science: DSA, DBMS, and OS.
 
-Your job is to evaluate a candidate's answer fairly and generously — reward partial knowledge, not just perfect answers.
+Scoring rubric (be fair and generous):
+- 0-2: Completely wrong or irrelevant
+- 3-4: Has some idea but major errors or very incomplete
+- 5-6: Understands basics but missing important details
+- 7-8: Good answer — correct and reasonably complete (most good answers land here)
+- 9-10: Excellent — thorough, accurate, well-explained
 
-Scoring rubric (be generous, not strict):
-- 0–2: Completely wrong, totally irrelevant, or shows zero understanding
-- 3–4: Has some relevant idea but major errors or very incomplete
-- 5–6: Understands the basics but missing important details or depth
-- 7–8: Good answer — correct, reasonably complete, minor gaps are fine
-- 9–10: Excellent — thorough, accurate, well-explained with examples or nuance
+Rules:
+1. A short but CORRECT answer deserves 7+. Brevity is not a flaw.
+2. Only score below 5 if the answer is actually wrong or irrelevant.
+3. Feedback: 2-3 sentences — what they got right, what could improve.
+4. Never invent facts not in the answer.
 
-Important guidelines:
-1. A short but CORRECT answer still deserves a 7+. Brevity is not a flaw.
-2. If the answer captures the core concept correctly, score it 7 or above.
-3. Only score below 5 if the answer is actually wrong or irrelevant — not just incomplete.
-4. Never hallucinate. Base feedback ONLY on what the candidate wrote.
-5. Feedback must be 2–3 sentences: what they got right, what could be improved.
-6. Confidence: how certain you are about the score (0.0–1.0).
-
-Respond ONLY with valid JSON — no markdown, no extra text:
+Respond ONLY with valid JSON, no markdown:
 {
-  "score": <float 0.0 to 10.0, one decimal place>,
+  "score": <float 0.0-10.0>,
   "feedback": "<2-3 sentence feedback>",
-  "confidence": <float 0.0 to 1.0, two decimal places>
+  "confidence": <float 0.0-1.0>
 }"""
 
 
 async def llm_evaluate(question: str, answer: str) -> dict:
-    user_message = f"""Question: {question}
+    api_key = os.environ.get("GEMINI_API_KEY", "")
+    if not api_key:
+        raise ValueError("GEMINI_API_KEY environment variable not set")
 
-Candidate's Answer: {answer}
-
-Evaluate the answer and respond with the JSON object."""
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}"
 
     payload = {
-        "model": "claude-sonnet-4-6",
-        "max_tokens": 1000,
-        "system": LLM_SYSTEM_PROMPT,
-        "messages": [{"role": "user", "content": user_message}],
+        "system_instruction": {"parts": [{"text": GEMINI_PROMPT}]},
+        "contents": [{
+            "parts": [{
+                "text": f"Question: {question}\n\nCandidate's Answer: {answer}\n\nEvaluate and respond with JSON."
+            }]
+        }],
+        "generationConfig": {
+            "temperature": 0.3,
+            "maxOutputTokens": 512,
+        }
     }
 
     async with httpx.AsyncClient(timeout=30) as client:
-        response = await client.post(
-            ANTHROPIC_API_URL,
-            json=payload,
-            headers={"Content-Type": "application/json"},
-        )
+        response = await client.post(url, json=payload, headers={"Content-Type": "application/json"})
         response.raise_for_status()
         data = response.json()
 
-    raw_text = data["content"][0]["text"].strip()
+    raw_text = data["candidates"][0]["content"]["parts"][0]["text"].strip()
+
+    # Strip markdown fences if present
     raw_text = re.sub(r"^```(?:json)?\s*", "", raw_text)
     raw_text = re.sub(r"\s*```$", "", raw_text)
 
     result = json.loads(raw_text)
 
     score = max(0.0, min(10.0, float(result["score"])))
-    score = round(score * 2) / 2   # snap to nearest 0.5
+    score = round(score * 2) / 2
     confidence = max(0.0, min(1.0, float(result["confidence"])))
     feedback = str(result["feedback"]).strip()
 
@@ -172,11 +159,10 @@ Evaluate the answer and respond with the JSON object."""
 
 
 # ──────────────────────────────────────────────
-# Hybrid Evaluation Orchestrator
+# Orchestrator
 # ──────────────────────────────────────────────
 
 async def evaluate(question: str, answer: str) -> dict:
-    # Step 1: Rule-based fast path
     rule_result = rule_based_check(question, answer)
     if rule_result:
         return {
@@ -185,17 +171,12 @@ async def evaluate(question: str, answer: str) -> dict:
             "confidence": rule_result["confidence"],
         }
 
-    # Step 2: Keyword relevance signal
     kw_relevance = keyword_relevance_score(question, answer)
-
-    # Step 3: LLM evaluation
     llm_result = await llm_evaluate(question, answer)
 
     final_score = llm_result["score"]
     final_confidence = llm_result["confidence"]
 
-    # Step 4: Only penalise if relevance is VERY low (< 0.05) AND score is high
-    # This only catches truly off-topic answers, not short/simple ones
     if kw_relevance < 0.05 and final_score > 6.0:
         final_score = max(final_score * 0.8, 4.0)
         final_confidence = round(final_confidence * 0.85, 2)
